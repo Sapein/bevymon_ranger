@@ -1,13 +1,13 @@
 mod ui;
 
 use crate::capture::math::{intersects, length};
+use crate::capture::ui::CaptureUiPlugin;
 use crate::creature::{Attack, CaptureProgress, CaptureRequirements, Creature};
 use avian2d::position::Rotation;
 use avian2d::prelude::{Collider, Collisions};
 use bevy::input::common_conditions::{input_just_released, input_pressed};
 use bevy::math::VectorSpace;
 use bevy::prelude::*;
-use crate::capture::ui::CaptureUiPlugin;
 
 pub struct CapturePlugin;
 impl Plugin for CapturePlugin {
