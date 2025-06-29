@@ -4,13 +4,15 @@ use avian2d::prelude::{Collider, Collisions};
 use bevy::input::common_conditions::{input_just_released, input_pressed};
 use bevy::math::VectorSpace;
 use bevy::prelude::*;
+use crate::capture::math::intersects;
 
 pub struct CapturePlugin;
 impl Plugin for CapturePlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<CaptureCircleComplete>()
+        app.add_event::<CaptureLineConnected>()
             .add_event::<CaptureLineCollision>()
-            .add_event::<CaptureLineLifted>()
+            .add_event::<CapturePointLifted>()
+            .add_event::<CapturePointPressed>()
             .add_event::<TakeDamage>()
             .add_event::<CaptureFailed>()
             .add_event::<CaptureSuccess>()
@@ -18,26 +20,25 @@ impl Plugin for CapturePlugin {
             .register_type::<Health>()
             .add_systems(Startup, setup)
             .add_systems(Update, adjust_linewidth)
-            .add_systems(Update, (take_damage, is_dead).chain())
+            .add_systems(Update, take_damage)
+            .add_systems(Update, player_start_capture.run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))))
+            .add_systems(Update, player_stop_capture.run_if(input_just_released(MouseButton::Left).or(input_just_released(MouseButton::Right))))
             .add_systems(
                 Update,
                 (
-                    add_points,
+                    add_points_to_capture_line,
                     detect_capture_collision,
                     detect_complete.run_if(not(on_event::<CaptureLineCollision>)),
-                    increase_capture_progress.run_if(on_event::<CaptureCircleComplete>),
+                    increase_capture_progress.run_if(on_event::<CaptureLineConnected>),
                     connect_points,
                 )
                     .chain()
-                    .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
+                    .run_if(on_event::<CapturePointPressed>)
             )
-            .add_systems(Last, shorten_line.run_if(on_event::<CaptureCircleComplete>))
+            .add_systems(Last, truncate_capture_line_to_intersection.run_if(on_event::<CaptureLineConnected>))
             .add_systems(
                 Update,
-                emit_capture_events.run_if(
-                    input_just_released(MouseButton::Left)
-                        .or(input_just_released(MouseButton::Right)),
-                ),
+                emit_capture_events.run_if(on_event::<CapturePointLifted>),
             )
             .add_systems(
                 Update,
@@ -45,11 +46,9 @@ impl Plugin for CapturePlugin {
                     .after(emit_capture_events)
                     .chain()
                     .run_if(
-                        input_just_released(MouseButton::Left).or(input_just_released(
-                            MouseButton::Right,
-                        )
-                        .or(on_event::<CursorLeft>)
-                        .or(on_event::<CaptureLineCollision>)),
+                        on_event::<CapturePointLifted>
+                            .or(on_event::<CursorLeft>)
+                            .or(on_event::<CaptureLineCollision>)
                     ),
             );
     }
@@ -85,6 +84,45 @@ fn setup(mut commands: Commands) {
     commands.spawn((CaptureLine::default(),Health(4)));
 }
 
+/// Represents when the user deliberately stops a capture 
+/// 
+/// (IE: Lifting their finger off of the screen, releasing the mouse, etc.)
+#[derive(Event, Debug)]
+pub struct CapturePointLifted;
+
+/// Represents when the user 'starts' a capture line.
+#[derive(Event, Debug)]
+pub struct CapturePointPressed;
+
+/// Represents when a capture failed
+/// 
+/// Whether it was 'ending' the capture too early, regardless of reason and includes the Entity
+/// that was attempted to be captured.
+#[derive(Event, Debug)]
+pub struct CaptureFailed(pub Entity);
+
+/// Represents when a Capture has succeeded.
+#[derive(Event, Debug)]
+pub struct CaptureSuccess {
+    /// The entity that was captured.
+    pub captured: Entity,
+    
+    /// The amount the 'overshot' occurred by.
+    pub overshot_by: usize,
+}
+
+#[derive(Event, Debug)]
+struct CaptureLineConnected {
+    cull_to: (usize, (Vec2, Vec2)),
+}
+
+#[derive(Event, Debug)]
+struct CaptureLineCollision;
+
+#[derive(Event, Debug)]
+struct TakeDamage(u32);
+
+
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
 struct Health(u32);
@@ -103,8 +141,10 @@ struct CaptureLine {
     line: Vec<Vec2>,
     start_color: Option<Color>,
     end_color: Option<Color>,
+    max_line_points: Option<usize>,
     width: f32,
 }
+
 impl Default for CaptureLine {
     fn default() -> Self {
         Self {
@@ -112,6 +152,7 @@ impl Default for CaptureLine {
             width: 4.0,
             start_color: Some(Color::linear_rgb(0.168_627_46, 0.211_764_71, 0.529_411_8)),
             end_color: Some(Color::linear_rgb(0.411_764_7, 0.478_431_37, 0.980_392_16)),
+            max_line_points: Some(100)
         }
     }
 }
@@ -123,37 +164,7 @@ fn take_damage(capture_line: Single<&mut Health>, mut damage_event: EventReader<
     }
 }
 
-fn is_dead(capture_line: Single<&mut Health>) {
-    let capture_line = capture_line.into_inner();
-    if capture_line.0 <= 0 {
-        println!("Game Over");
-    }
-}
-
-#[derive(Event, Debug)]
-struct CaptureCircleComplete {
-    intersecting_point_a: (usize, (Vec2, Vec2)),
-}
-
-#[derive(Event, Debug)]
-struct CaptureLineCollision;
-
-#[derive(Event, Debug)]
-struct TakeDamage(u32);
-
-#[derive(Event, Debug)]
-struct CaptureLineLifted;
-
-#[derive(Event, Debug)]
-pub struct CaptureFailed(pub Entity);
-
-#[derive(Event, Debug)]
-pub struct CaptureSuccess {
-    pub captured: Entity,
-    pub overshot_by: usize,
-}
-
-fn detect_complete(line: Single<&CaptureLine>, mut complete: EventWriter<CaptureCircleComplete>) {
+fn detect_complete(line: Single<&CaptureLine>, mut complete: EventWriter<CaptureLineConnected>) {
     if line.line.is_empty() {
         return;
     }
@@ -186,8 +197,8 @@ fn detect_complete(line: Single<&CaptureLine>, mut complete: EventWriter<Capture
                 || intersects(second_w1, first_w1).is_some()
                 || intersects(second_w2, first_w2).is_some()
             {
-                complete.write(CaptureCircleComplete {
-                    intersecting_point_a: (i, (*first.0, *first.1)),
+                complete.write(CaptureLineConnected {
+                    cull_to: (i, (*first.0, *first.1)),
                 });
             }
         }
@@ -213,32 +224,6 @@ fn increase_capture_progress(
     }
 }
 
-fn intersects(segment_a: (&Vec2, &Vec2), segment_b: (&Vec2, &Vec2)) -> Option<Vec2> {
-    let (x1, y1) = (segment_a.0.x, segment_a.0.y);
-    let (x2, y2) = (segment_a.1.x, segment_a.1.y);
-    let (x3, y3) = (segment_b.0.x, segment_b.0.y);
-    let (x4, y4) = (segment_b.1.x, segment_b.1.y);
-
-    if (x1 == x2) && (y1 == y2) || (x3 == x4) && (y3 == y4) {
-        return None;
-    }
-    let denominator = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
-    let numerator_a = (x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3);
-    let numerator_b = (x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3);
-
-    if denominator == 0. {
-        return None;
-    }
-
-    let ua = numerator_a / denominator;
-    let ub = numerator_b / denominator;
-
-    if !(0. ..=1.).contains(&ua) || !(0. ..=1.).contains(&ub) {
-        return None;
-    }
-
-    Some(Vec2::new(x1 + ua * (x2 - x1), y1 + ua * (y2 - y1)))
-}
 
 fn adjust_linewidth(mut config_store: ResMut<GizmoConfigStore>, lines: Single<&CaptureLine>) {
     let (config, _) = config_store.config_mut::<DefaultGizmoConfigGroup>();
@@ -270,7 +255,7 @@ fn connect_points(lines: Single<&CaptureLine>, mut gizmos: Gizmos) {
     }
 }
 
-fn add_points(
+fn add_points_to_capture_line(
     mut ev_mouse: EventReader<CursorMoved>,
     camera: Single<(&Camera, &GlobalTransform)>,
     lines: Single<(Entity, &mut CaptureLine)>,
@@ -284,8 +269,17 @@ fn add_points(
             .viewport_to_world(transform, mouse.position)
             .map(|r| r.origin.truncate())
             .unwrap();
-
+        
         line.line.push(line_pos);
+        
+        if let Some(max_points) = line.max_line_points {
+            if line.line.len() >= max_points {
+                for _ in 0..(line.line.len() - max_points) {
+                    line.line.remove(0);
+                }
+            }
+        }
+
         if line.line.len() >= 2 {
             commands
                 .entity(e)
@@ -294,10 +288,10 @@ fn add_points(
     }
 }
 
-fn shorten_line(
+fn truncate_capture_line_to_intersection(
     lines: Single<(Entity, &mut CaptureLine)>,
     mut commands: Commands,
-    mut event_reader: EventReader<CaptureCircleComplete>,
+    mut event_reader: EventReader<CaptureLineConnected>,
 ) {
     let (e, mut lines) = lines.into_inner();
     for complete in event_reader.read() {
@@ -309,9 +303,9 @@ fn shorten_line(
             .zip(points_2[1..].iter())
             .collect::<Vec<_>>();
 
-        let (point_a1, point_a2) = points[complete.intersecting_point_a.0];
-        if point_a1.1 == &complete.intersecting_point_a.1 .0
-            && point_a2.1 == &complete.intersecting_point_a.1 .1
+        let (point_a1, point_a2) = points[complete.cull_to.0];
+        if point_a1.1 == &complete.cull_to.1 .0
+            && point_a2.1 == &complete.cull_to.1 .1
         {
             lines.line.truncate(point_a1.0);
             commands
@@ -349,5 +343,47 @@ fn emit_capture_events(
         } else {
             failed_capture_event.write(CaptureFailed(entity));
         }
+    }
+}
+
+fn player_start_capture(
+    mut event_writer: EventWriter<CapturePointPressed>
+) {
+    event_writer.write(CapturePointPressed);
+}
+
+fn player_stop_capture(
+    mut event_writer: EventWriter<CapturePointLifted>
+) {
+    event_writer.write(CapturePointLifted);
+}
+
+mod math {
+    use bevy::math::Vec2;
+    pub(super) fn intersects(segment_a: (&Vec2, &Vec2), segment_b: (&Vec2, &Vec2)) -> Option<Vec2> {
+        let (x1, y1) = (segment_a.0.x, segment_a.0.y);
+        let (x2, y2) = (segment_a.1.x, segment_a.1.y);
+        let (x3, y3) = (segment_b.0.x, segment_b.0.y);
+        let (x4, y4) = (segment_b.1.x, segment_b.1.y);
+
+        if (x1 == x2) && (y1 == y2) || (x3 == x4) && (y3 == y4) {
+            return None;
+        }
+        let denominator = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+        let numerator_a = (x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3);
+        let numerator_b = (x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3);
+
+        if denominator == 0. {
+            return None;
+        }
+
+        let ua = numerator_a / denominator;
+        let ub = numerator_b / denominator;
+
+        if !(0. ..=1.).contains(&ua) || !(0. ..=1.).contains(&ub) {
+            return None;
+        }
+
+        Some(Vec2::new(x1 + ua * (x2 - x1), y1 + ua * (y2 - y1)))
     }
 }
