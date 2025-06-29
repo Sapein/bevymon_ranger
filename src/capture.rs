@@ -1,10 +1,13 @@
+mod ui;
+
+use crate::capture::math::{intersects, length};
 use crate::creature::{Attack, CaptureProgress, CaptureRequirements, Creature};
 use avian2d::position::Rotation;
 use avian2d::prelude::{Collider, Collisions};
 use bevy::input::common_conditions::{input_just_released, input_pressed};
 use bevy::math::VectorSpace;
 use bevy::prelude::*;
-use crate::capture::math::{intersects, length};
+use crate::capture::ui::CaptureUiPlugin;
 
 pub struct CapturePlugin;
 impl Plugin for CapturePlugin {
@@ -18,11 +21,22 @@ impl Plugin for CapturePlugin {
             .add_event::<CaptureSuccess>()
             .register_type::<CaptureLine>()
             .register_type::<Health>()
+            .add_plugins(CaptureUiPlugin)
             .add_systems(Startup, setup)
             .add_systems(Update, adjust_linewidth)
             .add_systems(Update, take_damage)
-            .add_systems(Update, player_start_capture.run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))))
-            .add_systems(Update, player_stop_capture.run_if(input_just_released(MouseButton::Left).or(input_just_released(MouseButton::Right))))
+            .add_systems(
+                Update,
+                player_start_capture
+                    .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
+            )
+            .add_systems(
+                Update,
+                player_stop_capture.run_if(
+                    input_just_released(MouseButton::Left)
+                        .or(input_just_released(MouseButton::Right)),
+                ),
+            )
             .add_systems(
                 Update,
                 (
@@ -33,9 +47,12 @@ impl Plugin for CapturePlugin {
                     connect_points,
                 )
                     .chain()
-                    .run_if(on_event::<CapturePointPressed>)
+                    .run_if(on_event::<CapturePointPressed>),
             )
-            .add_systems(Last, truncate_capture_line_to_intersection.run_if(on_event::<CaptureLineConnected>))
+            .add_systems(
+                Last,
+                truncate_capture_line_to_intersection.run_if(on_event::<CaptureLineConnected>),
+            )
             .add_systems(
                 Update,
                 emit_capture_events.run_if(on_event::<CapturePointLifted>),
@@ -48,13 +65,14 @@ impl Plugin for CapturePlugin {
                     .run_if(
                         on_event::<CapturePointLifted>
                             .or(on_event::<CursorLeft>)
-                            .or(on_event::<CaptureLineCollision>)
+                            .or(on_event::<CaptureLineCollision>),
                     ),
             );
     }
 }
 
 fn detect_capture_collision(
+    mut commands: Commands,
     capture_line: Single<Entity, With<CaptureLine>>,
     collisions: Collisions,
     mut collision: EventWriter<CaptureLineCollision>,
@@ -62,30 +80,29 @@ fn detect_capture_collision(
     damagable: Query<&Damage>,
 ) {
     let capture_line = capture_line.into_inner();
-    if let Some(collide) = collisions
-        .collisions_with(capture_line)
-        .next()
-    {
+    if let Some(collide) = collisions.collisions_with(capture_line).next() {
         let actual_collider = if collide.collider1 == capture_line {
             collide.collider2
         } else {
             collide.collider1
         };
-        
+
         if let Ok(d) = damagable.get(actual_collider) {
             damage.write(TakeDamage(d.0));
+            commands.trigger(TakeDamage(d.0));
         }
-        
+
         collision.write(CaptureLineCollision);
+        commands.trigger(CaptureLineCollision);
     }
 }
 
 fn setup(mut commands: Commands) {
-    commands.spawn((CaptureLine::default(),Health(4)));
+    commands.spawn((CaptureLine::default(), Health(4)));
 }
 
-/// Represents when the user deliberately stops a capture 
-/// 
+/// Represents when the user deliberately stops a capture
+///
 /// (IE: Lifting their finger off of the screen, releasing the mouse, etc.)
 #[derive(Event, Debug)]
 pub struct CapturePointLifted;
@@ -95,7 +112,7 @@ pub struct CapturePointLifted;
 pub struct CapturePointPressed;
 
 /// Represents when a capture failed
-/// 
+///
 /// Whether it was 'ending' the capture too early, regardless of reason and includes the Entity
 /// that was attempted to be captured.
 #[derive(Event, Debug)]
@@ -106,10 +123,13 @@ pub struct CaptureFailed(pub Entity);
 pub struct CaptureSuccess {
     /// The entity that was captured.
     pub captured: Entity,
-    
+
     /// The amount the 'overshot' occurred by.
     pub overshot_by: usize,
 }
+
+#[derive(Event, Debug)]
+pub struct CaptureProgressChanged(pub Entity);
 
 #[derive(Event, Debug)]
 struct CaptureLineConnected {
@@ -121,7 +141,6 @@ struct CaptureLineCollision;
 
 #[derive(Event, Debug)]
 struct TakeDamage(u32);
-
 
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
@@ -152,7 +171,7 @@ impl Default for CaptureLine {
             width: 4.0,
             start_color: Some(Color::linear_rgb(0.168_627_46, 0.211_764_71, 0.529_411_8)),
             end_color: Some(Color::linear_rgb(0.411_764_7, 0.478_431_37, 0.980_392_16)),
-            max_line_length: Some(200)
+            max_line_length: Some(500),
         }
     }
 }
@@ -206,24 +225,26 @@ fn detect_complete(line: Single<&CaptureLine>, mut complete: EventWriter<Capture
 }
 
 fn increase_capture_progress(
+    mut commands: Commands,
     capture_line: Single<(&CaptureLine, &Collider)>,
-    creatures: Query<(&mut CaptureProgress, &Transform), Without<Captured>>,
+    creatures: Query<(Entity, &mut CaptureProgress, &Transform), Without<Captured>>,
 ) {
     let (line, our_collider) = capture_line.into_inner();
-    for (mut progress, creature_location) in creatures {
+    for (entity, mut progress, creature_location) in creatures {
         let our_collider = our_collider.shape().as_polyline().unwrap();
         let polygon =
             Collider::convex_decomposition(line.line.clone(), our_collider.indices().to_vec());
+
         if polygon.contains_point(
             Vec2::ZERO,
             Rotation::IDENTITY,
             creature_location.translation.xy(),
         ) {
             progress.0 += 1;
+            commands.trigger(CaptureProgressChanged(entity));
         }
     }
 }
-
 
 fn adjust_linewidth(mut config_store: ResMut<GizmoConfigStore>, lines: Single<&CaptureLine>) {
     let (config, _) = config_store.config_mut::<DefaultGizmoConfigGroup>();
@@ -273,16 +294,26 @@ fn add_points_to_capture_line(
         if let Some(line_max) = line.max_line_length {
             let line_max = line_max as f32;
             if line.line.len() >= 2 {
-                let mut length: f32 = line.line.iter().zip(line.line[1..].iter()).map(length).sum();
+                let mut length: f32 = line
+                    .line
+                    .iter()
+                    .zip(line.line[1..].iter())
+                    .map(length)
+                    .sum();
                 while length > line_max {
                     line.line.remove(0);
-                    length = line.line.iter().zip(line.line[1..].iter()).map(math::length).sum();
+                    length = line
+                        .line
+                        .iter()
+                        .zip(line.line[1..].iter())
+                        .map(math::length)
+                        .sum();
                 }
             }
         }
-        
+
         line.line.push(line_pos);
-        
+
         if line.line.len() >= 2 {
             commands
                 .entity(e)
@@ -310,9 +341,7 @@ fn truncate_capture_line_to_intersection(
             continue;
         }
         let (point_a1, point_a2) = points[complete.cull_to.0];
-        if point_a1.1 == &complete.cull_to.1 .0
-            && point_a2.1 == &complete.cull_to.1 .1
-        {
+        if point_a1.1 == &complete.cull_to.1 .0 && point_a2.1 == &complete.cull_to.1 .1 {
             lines.line.truncate(point_a1.0);
             commands
                 .entity(e)
@@ -346,21 +375,22 @@ fn emit_capture_events(
                 overshot_by: (progress.0 - requirements.0) as usize,
             });
             commands.entity(entity).insert(Captured);
+            commands.trigger(CaptureSuccess {
+                captured: entity,
+                overshot_by: (progress.0 - requirements.0) as usize,
+            });
         } else {
             failed_capture_event.write(CaptureFailed(entity));
+            commands.trigger(CaptureFailed(entity));
         }
     }
 }
 
-fn player_start_capture(
-    mut event_writer: EventWriter<CapturePointPressed>
-) {
+fn player_start_capture(mut event_writer: EventWriter<CapturePointPressed>) {
     event_writer.write(CapturePointPressed);
 }
 
-fn player_stop_capture(
-    mut event_writer: EventWriter<CapturePointLifted>
-) {
+fn player_stop_capture(mut event_writer: EventWriter<CapturePointLifted>) {
     event_writer.write(CapturePointLifted);
 }
 
@@ -392,7 +422,7 @@ mod math {
 
         Some(Vec2::new(x1 + ua * (x2 - x1), y1 + ua * (y2 - y1)))
     }
-    
+
     pub(super) fn length(segment: (&Vec2, &Vec2)) -> f32 {
         let (x1, y1) = (segment.0.x, segment.0.y);
         let (x2, y2) = (segment.1.x, segment.1.y);

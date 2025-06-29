@@ -1,6 +1,6 @@
+use crate::capture::Damage;
 use avian2d::prelude::{Collider, RigidBody};
 use bevy::prelude::*;
-use crate::capture::Damage;
 
 pub struct CreaturePlugin;
 impl Plugin for CreaturePlugin {
@@ -51,7 +51,7 @@ fn attack(mut commands: Commands, asset_server: Res<AssetServer>, query: Single<
     commands.spawn((
         Damage(attack_hurt.0),
         Attack,
-        Collider::circle(32./2.),
+        Collider::circle(32. / 2.),
         Sprite::from_image(attack),
         RigidBody::Dynamic,
     ));
