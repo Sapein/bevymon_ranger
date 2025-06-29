@@ -1,0 +1,18 @@
+[package]
+name = "bevymon_ranger"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0 OR CC0-1.0"
+
+[dependencies]
+# Replace this with `bevy = "0.13"` when compiling a release build.
+bevy = { version = "0.16", features = ["dynamic_linking"] }
+bevy-inspector-egui = "0.31.0"
+bevy_simple_screen_boxing = "0.1.1"
+avian2d = "0.3"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
