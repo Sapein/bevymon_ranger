@@ -1,4 +1,4 @@
-use avian2d::prelude::{Collider, RigidBody};
+use avian2d::prelude::Collider;
 use bevy::prelude::*;
 
 pub struct CreaturePlugin;
