@@ -144,7 +144,7 @@ struct TakeDamage(u32);
 
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
-struct Health(u32);
+pub struct Health(pub(crate) u32);
 
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]

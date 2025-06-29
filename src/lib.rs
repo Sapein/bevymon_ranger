@@ -3,12 +3,15 @@ extern crate core;
 mod camera;
 mod capture;
 mod creature;
+mod ui;
+
 use crate::camera::BevymonCameraPlugin;
 use crate::capture::CapturePlugin;
 use crate::creature::CreaturePlugin;
 use bevy::prelude::*;
 use bevy_inspector_egui::bevy_egui::EguiPlugin;
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use crate::ui::UiPlugin;
 
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
@@ -25,6 +28,7 @@ impl Plugin for BevymonRangerPlugin {
         .add_plugins(BevymonCameraPlugin)
         .add_plugins(CapturePlugin)
         .add_plugins(CreaturePlugin)
+        .add_plugins(UiPlugin)
         .add_systems(Last, despawn_entities);
     }
 }
