@@ -1,4 +1,4 @@
-use crate::creature::{CaptureProgress, CaptureRequirements};
+use crate::creature::{Attack, CaptureProgress, CaptureRequirements, Creature};
 use avian2d::position::Rotation;
 use avian2d::prelude::{Collider, Collisions};
 use bevy::input::common_conditions::{input_just_released, input_pressed};
@@ -11,11 +11,14 @@ impl Plugin for CapturePlugin {
         app.add_event::<CaptureCircleComplete>()
             .add_event::<CaptureLineCollision>()
             .add_event::<CaptureLineLifted>()
+            .add_event::<TakeDamage>()
             .add_event::<CaptureFailed>()
             .add_event::<CaptureSuccess>()
             .register_type::<CaptureLine>()
+            .register_type::<Health>()
             .add_systems(Startup, setup)
             .add_systems(Update, adjust_linewidth)
+            .add_systems(Update, (take_damage, is_dead).chain())
             .add_systems(
                 Update,
                 (
@@ -56,19 +59,39 @@ fn detect_capture_collision(
     capture_line: Single<Entity, With<CaptureLine>>,
     collisions: Collisions,
     mut collision: EventWriter<CaptureLineCollision>,
+    mut damage: EventWriter<TakeDamage>,
+    damagable: Query<&Damage>,
 ) {
-    if collisions
-        .collisions_with(capture_line.into_inner())
+    let capture_line = capture_line.into_inner();
+    if let Some(collide) = collisions
+        .collisions_with(capture_line)
         .next()
-        .is_some()
     {
+        let actual_collider = if collide.collider1 == capture_line {
+            collide.collider2
+        } else {
+            collide.collider1
+        };
+        
+        if let Ok(d) = damagable.get(actual_collider) {
+            damage.write(TakeDamage(d.0));
+        }
+        
         collision.write(CaptureLineCollision);
     }
 }
 
 fn setup(mut commands: Commands) {
-    commands.spawn((CaptureLine::default(),));
+    commands.spawn((CaptureLine::default(),Health(4)));
 }
+
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+struct Health(u32);
+
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+pub struct Damage(pub u32);
 
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
@@ -93,6 +116,20 @@ impl Default for CaptureLine {
     }
 }
 
+fn take_damage(capture_line: Single<&mut Health>, mut damage_event: EventReader<TakeDamage>) {
+    let mut capture_line = capture_line.into_inner();
+    for damage in damage_event.read() {
+        capture_line.0 -= damage.0;
+    }
+}
+
+fn is_dead(capture_line: Single<&mut Health>) {
+    let capture_line = capture_line.into_inner();
+    if capture_line.0 <= 0 {
+        println!("Game Over");
+    }
+}
+
 #[derive(Event, Debug)]
 struct CaptureCircleComplete {
     intersecting_point_a: (usize, (Vec2, Vec2)),
@@ -100,6 +137,9 @@ struct CaptureCircleComplete {
 
 #[derive(Event, Debug)]
 struct CaptureLineCollision;
+
+#[derive(Event, Debug)]
+struct TakeDamage(u32);
 
 #[derive(Event, Debug)]
 struct CaptureLineLifted;
