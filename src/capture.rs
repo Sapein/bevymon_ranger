@@ -1,178 +1,308 @@
-use crate::Despawn;
+use avian2d::prelude::{Collider, Collisions};
+use avian2d::position::{Rotation};
 use bevy::input::common_conditions::{input_just_released, input_pressed};
+use bevy::math::VectorSpace;
 use bevy::prelude::*;
+use crate::creature::{CaptureProgress, CaptureRequirements};
 
 pub struct CapturePlugin;
 impl Plugin for CapturePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LinePoints>()
-            .init_resource::<DrawnPoints>()
-            .insert_resource(LineWidth(4.))
-            .register_type::<LineWidth>()
-            .add_event::<CaptureCircleComplete>()
+        app.add_event::<CaptureCircleComplete>()
+            .add_event::<CaptureLineCollision>()
+            .add_event::<CaptureLineLifted>()
+            .add_event::<CaptureFailed>()
+            .add_event::<CaptureSuccess>()
+            .register_type::<CaptureLine>()
+            .add_systems(Startup, setup)
+            .add_systems(Update, adjust_linewidth)
             .add_systems(
                 Update,
-                (add_points, detect_complete, connect_points)
+                (
+                    add_points,
+                    detect_capture_collision,
+                    detect_complete.run_if(not(on_event::<CaptureLineCollision>)),
+                    increase_capture_progress.run_if(on_event::<CaptureCircleComplete>),
+                    connect_points,
+                )
                     .chain()
                     .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
             )
             .add_systems(
+                Last,
+                shorten_line.run_if(on_event::<CaptureCircleComplete>)
+            )
+            .add_systems(
                 Update,
-                (clear_points, despawn_capture_lines).chain().run_if(
+                emit_capture_events.run_if(input_just_released(MouseButton::Left).or(input_just_released(MouseButton::Right)))
+            )
+            .add_systems(
+                Update,
+                (destroy_line, reset_capture_progress)
+                    .after(emit_capture_events)
+                    .chain().run_if(
                     input_just_released(MouseButton::Left).or(input_just_released(
                         MouseButton::Right,
                     )
                     .or(on_event::<CursorLeft>)
-                    .or(on_event::<CaptureCircleComplete>)),
+                    .or(on_event::<CaptureLineCollision>)),
                 ),
             );
     }
 }
 
-#[derive(Resource, Reflect, Debug, Default, Deref, DerefMut)]
-#[reflect(Resource)]
-struct LinePoints(Vec<Vec2>);
-
-#[derive(Resource, Reflect, Debug, Default, Deref, DerefMut)]
-#[reflect(Resource)]
-struct DrawnPoints(Vec<Vec2>);
-
-#[derive(Resource, Reflect, Debug, Default, Deref, DerefMut)]
-#[reflect(Resource)]
-struct LineWidth(f32);
-
-fn despawn_capture_lines(mut commands: Commands, lines: Query<Entity, With<CaptureLine>>) {
-    for e in lines {
-        commands.entity(e).insert(Despawn);
+fn detect_capture_collision(
+    capture_line: Single<Entity, With<CaptureLine>>,
+    collisions: Collisions,
+    mut collision: EventWriter<CaptureLineCollision>,
+) {
+    for _ in collisions.collisions_with(capture_line.into_inner()) {
+        collision.write(CaptureLineCollision);
+        break;
     }
+}
+
+fn setup(mut commands: Commands) {
+    commands.spawn((CaptureLine::default(),));
 }
 
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
-struct CaptureLine;
+struct Captured;
+
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+struct CaptureLine {
+    line: Vec<Vec2>,
+    start_color: Option<Color>,
+    end_color: Option<Color>,
+    width: f32,
+}
+impl Default for CaptureLine {
+    fn default() -> Self {
+        Self {
+            line: vec![],
+            width: 4.0,
+            start_color: Some(Color::linear_rgb(
+                0.16862745098039217,
+                0.21176470588235294,
+                0.5294117647058824,
+            )),
+            end_color: Some(Color::linear_rgb(
+                0.4117647058823529,
+                0.47843137254901963,
+                0.9803921568627451,
+            )),
+        }
+    }
+}
 
 #[derive(Event, Debug)]
-struct CaptureCircleComplete;
+struct CaptureCircleComplete {
+    intersecting_point_a: (usize, (Vec2, Vec2)),
+}
+
+#[derive(Event, Debug)]
+struct CaptureLineCollision;
+
+#[derive(Event, Debug)]
+struct CaptureLineLifted;
+
+#[derive(Event, Debug)]
+pub struct CaptureFailed(pub Entity);
+
+#[derive(Event, Debug)]
+pub struct CaptureSuccess {
+    pub captured: Entity,
+    pub overshot_by: usize,
+}
 
 fn detect_complete(
-    width: Res<LineWidth>,
-    mut drawn: ResMut<DrawnPoints>,
-    mut points: ResMut<LinePoints>,
+    line: Single<&CaptureLine>,
     mut complete: EventWriter<CaptureCircleComplete>,
 ) {
-    if drawn.is_empty() {
+    if line.line.is_empty() {
         return;
     }
-    let drawn_points = drawn.0.iter().zip(drawn[1..].iter());
-    let mut has_intersection = false;
-    for (i, first) in drawn_points.clone().enumerate() {
-        for second in drawn_points.clone().skip(i) {
+    let points = line.line.iter().zip(line.line[1..].iter());
+    for (i, first) in points.clone().enumerate() {
+        for second in points.clone().skip(i) {
             if second.0 == first.1 {
                 continue;
             }
 
-            let second_w1 = (&(second.0 + (width.0 / 2.)), &(second.1 + (width.0 / 2.)));
-            let second_w2 = (&(second.0 - (width.0 / 2.)), &(second.1 - (width.0 / 2.)));
+            let second_w1 = (
+                &(second.0 + (line.width / 2.)),
+                &(second.1 + (line.width / 2.)),
+            );
+            let second_w2 = (
+                &(second.0 - (line.width / 2.)),
+                &(second.1 - (line.width / 2.)),
+            );
 
-            let first_w1 = (&(first.0 + (width.0 / 2.)), &(first.1 + (width.0 / 2.)));
-            let first_w2 = (&(first.0 - (width.0 / 2.)), &(first.1 - (width.0 / 2.)));
-
-            if intersects(second, first)
-                || intersects(second_w1, first_w1)
-                || intersects(second_w2, first_w2)
-            {
-                has_intersection = true;
-                complete.write(CaptureCircleComplete);
+            let first_w1 = (
+                &(first.0 + (line.width / 2.)),
+                &(first.1 + (line.width / 2.)),
+            );
+            let first_w2 = (
+                &(first.0 - (line.width / 2.)),
+                &(first.1 - (line.width / 2.)),
+            );
+            
+            if let Some(_) = intersects(second, first) {
+                complete.write(CaptureCircleComplete {
+                    intersecting_point_a: (i, (*first.0, *first.1)),
+                });
+            } else if let Some(_) = intersects(second_w1, first_w1) {
+                complete.write(CaptureCircleComplete {
+                    intersecting_point_a: (i, (*first.0, *first.1)),
+                });
+            } else if let Some(_) = intersects(second_w2, first_w2) {
+                complete.write(CaptureCircleComplete {
+                    intersecting_point_a: (i, (*first.0, *first.1)),
+                });
             }
         }
     }
-    if has_intersection {
-        drawn.clear();
-        points.clear();
+}
+
+fn increase_capture_progress(
+    capture_line: Single<(&CaptureLine, &Collider)>,
+    creatures: Query<(&mut CaptureProgress, &Transform), Without<Captured>>,
+) {
+    let (line, our_collider) = capture_line.into_inner();
+    for (mut progress, creature_location) in creatures {
+        let our_collider = our_collider.shape().as_polyline().unwrap();
+        let polygon = Collider::convex_decomposition(line.line.clone(), our_collider.indices().to_vec());
+        if polygon.contains_point(Vec2::ZERO, Rotation::IDENTITY, creature_location.translation.xy()) {
+            progress.0 += 1;
+        }
     }
 }
 
-fn intersects(segment_a: (&Vec2, &Vec2), segment_b: (&Vec2, &Vec2)) -> bool {
+fn intersects(segment_a: (&Vec2, &Vec2), segment_b: (&Vec2, &Vec2)) -> Option<Vec2> {
     let (x1, y1) = (segment_a.0.x, segment_a.0.y);
     let (x2, y2) = (segment_a.1.x, segment_a.1.y);
     let (x3, y3) = (segment_b.0.x, segment_b.0.y);
     let (x4, y4) = (segment_b.1.x, segment_b.1.y);
 
     if (x1 == x2) && (y1 == y2) || (x3 == x4) && (y3 == y4) {
-        return false;
+        return None;
     }
     let denominator = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
     let numerator_a = (x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3);
     let numerator_b = (x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3);
 
     if denominator == 0. {
-        return false;
+        return None;
     }
 
     let ua = numerator_a / denominator;
     let ub = numerator_b / denominator;
 
     if !(0. ..=1.).contains(&ua) || !(0. ..=1.).contains(&ub) {
-        return false;
+        return None;
     }
 
-    true
+    Some(Vec2::new(x1 + ua * (x2 - x1), y1 + ua * (y2 - y1)))
 }
 
-fn connect_points(
-    mut commands: Commands,
-    lines: Res<LinePoints>,
-    width: Res<LineWidth>,
-    mut drawn: ResMut<DrawnPoints>,
-    mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
-) {
-    if lines.is_changed() && !lines.is_empty() {
-        let zipped = lines.iter().zip(lines[1..].iter());
-        for (start, end) in zipped.clone() {
-            if !drawn.contains(start) || !drawn.contains(end) {
-                let mut gizmo = GizmoAsset::default();
-                gizmo.line_2d(*start, *end, Color::WHITE);
+fn adjust_linewidth(mut config_store: ResMut<GizmoConfigStore>, lines: Single<&CaptureLine>) {
+    let (config, _) = config_store.config_mut::<DefaultGizmoConfigGroup>();
+    config.line.joints = GizmoLineJoint::Round(1);
+    config.line.width = lines.width;
+}
 
-                commands.spawn((
-                    Gizmo {
-                        handle: gizmo_assets.add(gizmo),
-                        line_config: GizmoLineConfig {
-                            width: width.0,
-                            ..default()
-                        },
-                        ..default()
-                    },
-                    CaptureLine,
-                ));
-
-                if !drawn.contains(start) {
-                    drawn.push(*start);
-                }
-                if !drawn.contains(end) {
-                    drawn.push(*end);
-                }
-            }
+fn connect_points(lines: Single<&CaptureLine>, mut gizmos: Gizmos) {
+    if !lines.line.is_empty() {
+        if lines.start_color.is_none() || lines.end_color.is_none() {
+            let color = match (lines.start_color, lines.end_color) {
+                (Some(c), None) => c,
+                (None, Some(c)) => c,
+                _ => Color::WHITE,
+            };
+            gizmos.linestrip_2d(lines.line.clone().into_iter(), color);
+        } else {
+            let start_color = lines.start_color.unwrap().to_linear();
+            let end_color = lines.end_color.unwrap().to_linear();
+            let lines_count = lines.line.len() as f32;
+            let lines = lines.line.clone().into_iter().enumerate().map(|(i, v)| {
+                (
+                    v,
+                    Color::LinearRgba(start_color.lerp(end_color, i as f32 / lines_count)),
+                )
+            });
+            gizmos.linestrip_gradient_2d(lines);
         }
     }
 }
 
 fn add_points(
-    mut lines: ResMut<LinePoints>,
     mut ev_mouse: EventReader<CursorMoved>,
     camera: Single<(&Camera, &GlobalTransform)>,
+    lines: Single<(Entity, &mut CaptureLine)>,
+    mut commands: Commands,
 ) {
     let (camera, transform) = camera.into_inner();
 
+    let (e, mut line) = lines.into_inner();
     for mouse in ev_mouse.read() {
         let line_pos = camera
             .viewport_to_world(transform, mouse.position)
             .map(|r| r.origin.truncate())
             .unwrap();
-        lines.push(line_pos);
+
+        line.line.push(line_pos);
+        if line.line.len() >= 2 {
+            commands
+                .entity(e)
+                .insert((Collider::polyline(line.line.clone(), None),));
+        }
     }
 }
 
-fn clear_points(mut lines: ResMut<LinePoints>, mut drawn: ResMut<DrawnPoints>) {
-    lines.clear();
-    drawn.clear();
+fn shorten_line(lines: Single<(Entity, &mut CaptureLine)>, mut commands: Commands, mut event_reader: EventReader<CaptureCircleComplete>) {
+    let (e, mut lines) = lines.into_inner();
+    for complete in event_reader.read() {
+        let points_2 = lines.line.iter().enumerate().collect::<Vec<_>>();
+        let points = lines.line.clone();
+        let points = points.iter().enumerate().zip(points_2[1..].iter()).collect::<Vec<_>>();
+        
+        let (point_a1, point_a2) = points[complete.intersecting_point_a.0].clone();
+        if point_a1.1 == &complete.intersecting_point_a.1.0 && point_a2.1 == &complete.intersecting_point_a.1.1 {
+            lines.line.truncate(point_a1.0);
+            commands.entity(e).insert(Collider::polyline(lines.line.clone(), None));
+        }
+    }
+}
+
+fn destroy_line(lines: Single<(Entity, &mut CaptureLine)>, mut commands: Commands) {
+    let (e, mut lines) = lines.into_inner();
+    lines.line.clear();
+    commands.entity(e).remove_with_requires::<Collider>();
+}
+
+fn reset_capture_progress(creature_progress: Query<&mut CaptureProgress, Without<Captured>>) {
+    for mut progress in creature_progress {
+        progress.0 = 0;
+    }
+}
+
+fn emit_capture_events(
+    mut commands: Commands,
+    creatures: Query<(Entity, &CaptureProgress, &CaptureRequirements), Without<Captured>>,
+    mut capture_event: EventWriter<CaptureSuccess>,
+    mut failed_capture_event: EventWriter<CaptureFailed>,
+) {
+    for (entity, progress, requirements) in creatures.iter() {
+        if progress.0 >= requirements.0 {
+            capture_event.write(CaptureSuccess {
+                captured: entity,
+                overshot_by: (progress.0 - requirements.0) as usize,
+            });
+            commands.entity(entity).insert(Captured);
+        } else {
+            failed_capture_event.write(CaptureFailed(entity));
+        }
+    }
 }

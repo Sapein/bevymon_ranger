@@ -3,7 +3,6 @@ extern crate core;
 mod camera;
 mod capture;
 mod creature;
-
 use crate::camera::BevymonCameraPlugin;
 use crate::capture::CapturePlugin;
 use crate::creature::CreaturePlugin;
@@ -21,11 +20,11 @@ impl Plugin for BevymonRangerPlugin {
         app.add_plugins(EguiPlugin {
             enable_multipass_for_primary_context: true,
         })
+        .add_plugins(avian2d::PhysicsPlugins::default())
         .add_plugins(WorldInspectorPlugin::new())
         .add_plugins(BevymonCameraPlugin)
         .add_plugins(CapturePlugin)
         .add_plugins(CreaturePlugin)
-        .add_plugins(avian2d::PhysicsPlugins::default())
         .add_systems(Last, despawn_entities);
     }
 }
