@@ -8,8 +8,7 @@ impl Plugin for CreaturePlugin {
         app.register_type::<Creature>()
             .register_type::<CaptureProgress>()
             .register_type::<CaptureRequirements>()
-            .add_systems(Startup, spawn_enemy)
-            .add_systems(Update, attack);
+            .add_systems(Startup, spawn_enemy);
     }
 }
 

@@ -4,7 +4,7 @@ use avian2d::prelude::{Collider, Collisions};
 use bevy::input::common_conditions::{input_just_released, input_pressed};
 use bevy::math::VectorSpace;
 use bevy::prelude::*;
-use crate::capture::math::intersects;
+use crate::capture::math::{intersects, length};
 
 pub struct CapturePlugin;
 impl Plugin for CapturePlugin {
@@ -141,7 +141,7 @@ struct CaptureLine {
     line: Vec<Vec2>,
     start_color: Option<Color>,
     end_color: Option<Color>,
-    max_line_points: Option<usize>,
+    max_line_length: Option<usize>,
     width: f32,
 }
 
@@ -152,7 +152,7 @@ impl Default for CaptureLine {
             width: 4.0,
             start_color: Some(Color::linear_rgb(0.168_627_46, 0.211_764_71, 0.529_411_8)),
             end_color: Some(Color::linear_rgb(0.411_764_7, 0.478_431_37, 0.980_392_16)),
-            max_line_points: Some(100)
+            max_line_length: Some(200)
         }
     }
 }
@@ -269,17 +269,20 @@ fn add_points_to_capture_line(
             .viewport_to_world(transform, mouse.position)
             .map(|r| r.origin.truncate())
             .unwrap();
-        
-        line.line.push(line_pos);
-        
-        if let Some(max_points) = line.max_line_points {
-            if line.line.len() >= max_points {
-                for _ in 0..(line.line.len() - max_points) {
+
+        if let Some(line_max) = line.max_line_length {
+            let line_max = line_max as f32;
+            if line.line.len() >= 2 {
+                let mut length: f32 = line.line.iter().zip(line.line[1..].iter()).map(length).sum();
+                while length > line_max {
                     line.line.remove(0);
+                    length = line.line.iter().zip(line.line[1..].iter()).map(math::length).sum();
                 }
             }
         }
-
+        
+        line.line.push(line_pos);
+        
         if line.line.len() >= 2 {
             commands
                 .entity(e)
@@ -303,6 +306,9 @@ fn truncate_capture_line_to_intersection(
             .zip(points_2[1..].iter())
             .collect::<Vec<_>>();
 
+        if points.len() <= complete.cull_to.0 {
+            continue;
+        }
         let (point_a1, point_a2) = points[complete.cull_to.0];
         if point_a1.1 == &complete.cull_to.1 .0
             && point_a2.1 == &complete.cull_to.1 .1
@@ -359,7 +365,7 @@ fn player_stop_capture(
 }
 
 mod math {
-    use bevy::math::Vec2;
+    use bevy::math::{FloatPow, Vec2};
     pub(super) fn intersects(segment_a: (&Vec2, &Vec2), segment_b: (&Vec2, &Vec2)) -> Option<Vec2> {
         let (x1, y1) = (segment_a.0.x, segment_a.0.y);
         let (x2, y2) = (segment_a.1.x, segment_a.1.y);
@@ -385,5 +391,12 @@ mod math {
         }
 
         Some(Vec2::new(x1 + ua * (x2 - x1), y1 + ua * (y2 - y1)))
+    }
+    
+    pub(super) fn length(segment: (&Vec2, &Vec2)) -> f32 {
+        let (x1, y1) = (segment.0.x, segment.0.y);
+        let (x2, y2) = (segment.1.x, segment.1.y);
+
+        ((x2 - x1).squared() + (y2 - y1).squared()).sqrt()
     }
 }
