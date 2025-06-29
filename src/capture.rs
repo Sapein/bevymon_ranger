@@ -2,7 +2,7 @@ mod ui;
 
 use crate::capture::math::{intersects, length};
 use crate::capture::ui::CaptureUiPlugin;
-use crate::creature::{Attack, CaptureProgress, CaptureRequirements, Creature};
+use crate::creature::{CaptureProgress, CaptureRequirements};
 use avian2d::position::Rotation;
 use avian2d::prelude::{Collider, Collisions};
 use bevy::input::common_conditions::{input_just_released, input_pressed};

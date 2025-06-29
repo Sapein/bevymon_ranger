@@ -67,11 +67,7 @@ fn capture_status_changed(
         Err(_) => return,
     };
 
-    let remaining = if requirements.0 > progress.0 {
-        requirements.0 - progress.0
-    } else {
-        0
-    };
+    let remaining = requirements.0.saturating_sub(progress.0);
 
     if let Some(children) = children {
         let (mut text, mut color, mut timer) = existing_ui.get_mut(children[0]).unwrap();
@@ -82,23 +78,21 @@ fn capture_status_changed(
         } else {
             *text = Text2d::from(remaining.to_string());
         }
+    } else if remaining == 0 {
+        commands.entity(creature).with_child((
+            TextDisappearTimer(Timer::from_seconds(5., TimerMode::Once)),
+            Text2d::from("OK"),
+            TextColor(color::palettes::css::LIGHT_SEA_GREEN.into()),
+            CaptureCountText,
+            TextLayout::new_with_justify(JustifyText::Center),
+        ));
     } else {
-        if remaining == 0 {
-            commands.entity(creature).with_child((
-                TextDisappearTimer(Timer::from_seconds(5., TimerMode::Once)),
-                Text2d::from("OK"),
-                TextColor(color::palettes::css::LIGHT_SEA_GREEN.into()),
-                CaptureCountText,
-                TextLayout::new_with_justify(JustifyText::Center),
-            ));
-        } else {
-            commands.entity(creature).with_child((
-                TextDisappearTimer(Timer::from_seconds(5., TimerMode::Once)),
-                Text2d::from(remaining.to_string()),
-                TextColor(Color::WHITE),
-                CaptureCountText,
-                TextLayout::new_with_justify(JustifyText::Center),
-            ));
-        }
+        commands.entity(creature).with_child((
+            TextDisappearTimer(Timer::from_seconds(5., TimerMode::Once)),
+            Text2d::from(remaining.to_string()),
+            TextColor(Color::WHITE),
+            CaptureCountText,
+            TextLayout::new_with_justify(JustifyText::Center),
+        ));
     }
 }
