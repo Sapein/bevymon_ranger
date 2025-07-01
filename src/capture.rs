@@ -343,9 +343,11 @@ fn truncate_capture_line_to_intersection(
         let (point_a1, point_a2) = points[complete.cull_to.0];
         if point_a1.1 == &complete.cull_to.1 .0 && point_a2.1 == &complete.cull_to.1 .1 {
             lines.line.truncate(point_a1.0);
-            commands
-                .entity(e)
-                .insert(Collider::polyline(lines.line.clone(), None));
+            if lines.line.len() >= 2 {
+                commands
+                    .entity(e)
+                    .insert(Collider::polyline(lines.line.clone(), None));
+            }
         }
     }
 }
