@@ -8,7 +8,6 @@ pub struct CaptureUiPlugin;
 impl Plugin for CaptureUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, tick_timer)
-            .add_observer(capture_incomplete::<CaptureFailed>)
             .add_observer(capture_incomplete::<CaptureLineCollision>)
             .add_observer(capture_status_changed);
     }
@@ -80,7 +79,7 @@ fn capture_status_changed(
         }
     } else if remaining == 0 {
         commands.entity(creature).with_child((
-            TextDisappearTimer(Timer::from_seconds(5., TimerMode::Once)),
+            TextDisappearTimer(Timer::from_seconds(10., TimerMode::Once)),
             Text2d::from("OK"),
             TextColor(color::palettes::css::LIGHT_SEA_GREEN.into()),
             CaptureCountText,
@@ -88,7 +87,7 @@ fn capture_status_changed(
         ));
     } else {
         commands.entity(creature).with_child((
-            TextDisappearTimer(Timer::from_seconds(5., TimerMode::Once)),
+            TextDisappearTimer(Timer::from_seconds(10., TimerMode::Once)),
             Text2d::from(remaining.to_string()),
             TextColor(Color::WHITE),
             CaptureCountText,
