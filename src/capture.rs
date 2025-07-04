@@ -21,6 +21,8 @@ impl Plugin for CapturePlugin {
             .add_event::<CaptureSuccess>()
             .register_type::<CaptureLine>()
             .register_type::<Health>()
+            .register_type::<Assets>()
+            .init_resource::<Assets>()
             .add_plugins(CaptureUiPlugin)
             .add_systems(Startup, setup)
             .add_systems(Update, adjust_linewidth)
@@ -97,8 +99,9 @@ fn detect_capture_collision(
     }
 }
 
-fn setup(mut commands: Commands) {
-    commands.spawn((CaptureLine::default(), Health(4)));
+fn setup(asset_server: Res<AssetServer>, mut assets: ResMut<Assets>) {
+    assets.styler = asset_server.load("Capture-Styler.png");
+    assets.styler_start = asset_server.load("captureline-start2.png");
 }
 
 /// Represents when the user deliberately stops a capture
@@ -127,6 +130,14 @@ pub struct CaptureSuccess {
     /// The amount the 'overshot' occurred by.
     pub overshot_by: usize,
 }
+
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+struct CaptureLineStart;
+
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+struct CaptureStyler;
 
 #[derive(Event, Debug)]
 pub struct CaptureProgressChanged(pub Entity);
@@ -162,6 +173,13 @@ struct CaptureLine {
     end_color: Option<Color>,
     max_line_length: Option<usize>,
     width: f32,
+}
+
+#[derive(Resource, Reflect, Debug, Default)]
+#[reflect(Resource)]
+struct Assets {
+    styler: Handle<Image>,
+    styler_start: Handle<Image>,
 }
 
 impl Default for CaptureLine {
@@ -286,10 +304,7 @@ fn add_points_to_capture_line(
 
     let (e, mut line) = lines.into_inner();
     for mouse in ev_mouse.read() {
-        let line_pos = camera
-            .viewport_to_world(transform, mouse.position)
-            .map(|r| r.origin.truncate())
-            .unwrap();
+        let line_pos = camera.viewport_to_world_2d(transform, mouse.position).expect("Unable to get world coordinates from viewport!");
 
         if let Some(line_max) = line.max_line_length {
             let line_max = line_max as f32;
