@@ -19,7 +19,11 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         Camera2d,
         Camera {
-            clear_color: ClearColorConfig::Custom(Color::linear_rgb(204./255., 170./255., 92./255.)),
+            clear_color: ClearColorConfig::Custom(Color::linear_rgb(
+                204. / 255.,
+                170. / 255.,
+                92. / 255.,
+            )),
             ..default()
         },
         Orthographic(projection),
