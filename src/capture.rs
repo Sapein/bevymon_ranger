@@ -113,9 +113,10 @@ fn detect_capture_collision(
     }
 }
 
-fn setup(asset_server: Res<AssetServer>, mut assets: ResMut<Assets>) {
+fn setup(asset_server: Res<AssetServer>, mut assets: ResMut<Assets>, mut commands: Commands) {
     assets.styler = asset_server.load("Capture-Styler.png");
     assets.styler_start = asset_server.load("captureline-start2.png");
+    commands.spawn(Health(4));
 }
 
 /// Represents when the user deliberately stops a capture
@@ -482,7 +483,6 @@ fn player_start_capture(
             width: 12.,
             ..default()
         },
-        Health(4),
         DespawnWith(parent),
     ));
 
