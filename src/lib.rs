@@ -46,4 +46,3 @@ fn despawn_entities(mut commands: Commands, entities: Query<Entity, With<Despawn
         commands.entity(entity).despawn()
     }
 }
-

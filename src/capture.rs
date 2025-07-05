@@ -5,17 +5,13 @@ use crate::capture::math::{intersects, length};
 use crate::capture::ui::CaptureUiPlugin;
 use crate::creature::{CaptureProgress, CaptureRequirements};
 use crate::{Despawn, DespawnWith};
-use avian2d::parry::na::Isometry2;
 use avian2d::position::Rotation;
 use avian2d::prelude::{Collider, Collisions};
-use bevy::input::common_conditions::{input_just_pressed, input_just_released, input_pressed};
-use bevy::math::bounding::Bounded2d;
+use bevy::input::common_conditions::{input_just_pressed, input_just_released};
 use bevy::math::VectorSpace;
 use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
 use bevy::window::PrimaryWindow;
-use std::process::id;
-use bevy::sprite::Anchor;
 
 pub struct CapturePlugin;
 impl Plugin for CapturePlugin {
@@ -102,7 +98,7 @@ fn detect_capture_collision(
         } else {
             collision.collider1
         };
-        
+
         if actual_collider == capture_start {
             continue;
         }
@@ -219,10 +215,7 @@ fn take_damage(capture_line: Single<&mut Health>, mut damage_event: EventReader<
     }
 }
 
-fn detect_complete(
-    line: Single<&CaptureLine>,
-    mut complete: EventWriter<CaptureLineConnected>,
-) {
+fn detect_complete(line: Single<&CaptureLine>, mut complete: EventWriter<CaptureLineConnected>) {
     if line.line.is_empty() {
         return;
     }
@@ -419,7 +412,7 @@ fn trail_line(
     }
 
     if line.line[0] != capture_start.translation.xy() {
-        capture_start.translation = line.line[0].clone().extend(capture_start.translation.z);
+        capture_start.translation = line.line[0].extend(capture_start.translation.z);
     }
 }
 
@@ -482,7 +475,7 @@ fn player_start_capture(
             Transform::from_translation(current_point.extend(0.)),
         ))
         .id();
-    
+
     commands.spawn((
         CaptureLine {
             line: vec![current_point],
@@ -500,7 +493,6 @@ fn player_start_capture(
         DespawnWith(parent),
     ));
 }
-
 
 fn player_stop_capture(mut event_writer: EventWriter<CapturePointLifted>) {
     event_writer.write(CapturePointLifted);
