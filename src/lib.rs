@@ -31,8 +31,19 @@ impl Plugin for BevymonRangerPlugin {
     }
 }
 
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+#[relationship(relationship_target = DespawnChildren)]
+pub(crate) struct DespawnWith(Entity);
+
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+#[relationship_target(relationship = DespawnWith, linked_spawn)]
+pub(crate) struct DespawnChildren(Vec<Entity>);
 fn despawn_entities(mut commands: Commands, entities: Query<Entity, With<Despawn>>) {
     for entity in entities {
-        commands.entity(entity).despawn();
+        commands.entity(entity).despawn_related::<DespawnChildren>();
+        commands.entity(entity).despawn()
     }
 }
+

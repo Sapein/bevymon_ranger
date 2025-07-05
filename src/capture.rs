@@ -1,13 +1,21 @@
 mod ui;
 
+use crate::camera::GizmoCamera;
 use crate::capture::math::{intersects, length};
 use crate::capture::ui::CaptureUiPlugin;
 use crate::creature::{CaptureProgress, CaptureRequirements};
+use crate::{Despawn, DespawnWith};
+use avian2d::parry::na::Isometry2;
 use avian2d::position::Rotation;
 use avian2d::prelude::{Collider, Collisions};
-use bevy::input::common_conditions::{input_just_released, input_pressed};
+use bevy::input::common_conditions::{input_just_pressed, input_just_released, input_pressed};
+use bevy::math::bounding::Bounded2d;
 use bevy::math::VectorSpace;
 use bevy::prelude::*;
+use bevy::render::view::RenderLayers;
+use bevy::window::PrimaryWindow;
+use std::process::id;
+use bevy::sprite::Anchor;
 
 pub struct CapturePlugin;
 impl Plugin for CapturePlugin {
@@ -29,8 +37,10 @@ impl Plugin for CapturePlugin {
             .add_systems(Update, take_damage)
             .add_systems(
                 Update,
-                player_start_capture
-                    .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
+                player_start_capture.run_if(
+                    input_just_pressed(MouseButton::Left)
+                        .or(input_just_pressed(MouseButton::Right)),
+                ),
             )
             .add_systems(
                 Update,
@@ -43,13 +53,15 @@ impl Plugin for CapturePlugin {
                 Update,
                 (
                     add_points_to_capture_line,
+                    trail_line,
+                    follow_styler,
                     detect_capture_collision,
                     detect_complete.run_if(not(on_event::<CaptureLineCollision>)),
                     increase_capture_progress.run_if(on_event::<CaptureLineConnected>),
                     connect_points,
                 )
                     .chain()
-                    .run_if(on_event::<CapturePointPressed>),
+                    .run_if(any_with_component::<CaptureLine>),
             )
             .add_systems(
                 Last,
@@ -76,25 +88,31 @@ impl Plugin for CapturePlugin {
 fn detect_capture_collision(
     mut commands: Commands,
     capture_line: Single<Entity, With<CaptureLine>>,
+    capture_start: Single<Entity, With<CaptureLineStart>>,
     collisions: Collisions,
-    mut collision: EventWriter<CaptureLineCollision>,
+    mut collision_event: EventWriter<CaptureLineCollision>,
     mut damage: EventWriter<TakeDamage>,
     damagable: Query<&Damage>,
 ) {
     let capture_line = capture_line.into_inner();
-    if let Some(collide) = collisions.collisions_with(capture_line).next() {
-        let actual_collider = if collide.collider1 == capture_line {
-            collide.collider2
+    let capture_start = capture_start.into_inner();
+    for collision in collisions.collisions_with(capture_line) {
+        let actual_collider = if collision.collider1 == capture_line {
+            collision.collider2
         } else {
-            collide.collider1
+            collision.collider1
         };
+        
+        if actual_collider == capture_start {
+            continue;
+        }
 
         if let Ok(d) = damagable.get(actual_collider) {
             damage.write(TakeDamage(d.0));
             commands.trigger(TakeDamage(d.0));
         }
 
-        collision.write(CaptureLineCollision);
+        collision_event.write(CaptureLineCollision);
         commands.trigger(CaptureLineCollision);
     }
 }
@@ -186,7 +204,7 @@ impl Default for CaptureLine {
     fn default() -> Self {
         Self {
             line: vec![],
-            width: 4.0,
+            width: 10.0,
             start_color: Some(Color::linear_rgb(0.168_627_46, 0.211_764_71, 0.529_411_8)),
             end_color: Some(Color::linear_rgb(0.411_764_7, 0.478_431_37, 0.980_392_16)),
             max_line_length: Some(500),
@@ -201,10 +219,14 @@ fn take_damage(capture_line: Single<&mut Health>, mut damage_event: EventReader<
     }
 }
 
-fn detect_complete(line: Single<&CaptureLine>, mut complete: EventWriter<CaptureLineConnected>) {
+fn detect_complete(
+    line: Single<&CaptureLine>,
+    mut complete: EventWriter<CaptureLineConnected>,
+) {
     if line.line.is_empty() {
         return;
     }
+
     let points = line.line.iter().zip(line.line[1..].iter());
     for (i, first) in points.clone().enumerate() {
         for second in points.clone().skip(i) {
@@ -268,6 +290,7 @@ fn adjust_linewidth(mut config_store: ResMut<GizmoConfigStore>, lines: Single<&C
     let (config, _) = config_store.config_mut::<DefaultGizmoConfigGroup>();
     config.line.joints = GizmoLineJoint::Round(1);
     config.line.width = lines.width;
+    config.render_layers = RenderLayers::layer(1);
 }
 
 fn connect_points(lines: Single<&CaptureLine>, mut gizmos: Gizmos) {
@@ -296,7 +319,7 @@ fn connect_points(lines: Single<&CaptureLine>, mut gizmos: Gizmos) {
 
 fn add_points_to_capture_line(
     mut ev_mouse: EventReader<CursorMoved>,
-    camera: Single<(&Camera, &GlobalTransform)>,
+    camera: Single<(&Camera, &GlobalTransform), Without<GizmoCamera>>,
     lines: Single<(Entity, &mut CaptureLine)>,
     mut commands: Commands,
 ) {
@@ -304,7 +327,9 @@ fn add_points_to_capture_line(
 
     let (e, mut line) = lines.into_inner();
     for mouse in ev_mouse.read() {
-        let line_pos = camera.viewport_to_world_2d(transform, mouse.position).expect("Unable to get world coordinates from viewport!");
+        let line_pos = camera
+            .viewport_to_world_2d(transform, mouse.position)
+            .expect("Unable to get world coordinates from viewport!");
 
         if let Some(line_max) = line.max_line_length {
             let line_max = line_max as f32;
@@ -367,10 +392,40 @@ fn truncate_capture_line_to_intersection(
     }
 }
 
-fn destroy_line(lines: Single<(Entity, &mut CaptureLine)>, mut commands: Commands) {
-    let (e, mut lines) = lines.into_inner();
-    lines.line.clear();
-    commands.entity(e).remove_with_requires::<Collider>();
+fn follow_styler(
+    line: Single<&CaptureLine>,
+    capture_styler: Single<&mut Transform, With<CaptureStyler>>,
+) {
+    let line = line.into_inner();
+    let mut capture_styler = capture_styler.into_inner();
+
+    if line.line.is_empty() {
+        return;
+    }
+
+    if line.line.last().unwrap() != &capture_styler.translation.xy() {
+        capture_styler.translation = line.line.last().unwrap().extend(0.);
+    }
+}
+
+fn trail_line(
+    line: Single<&CaptureLine>,
+    capture_start: Single<&mut Transform, With<CaptureLineStart>>,
+) {
+    let line = line.into_inner();
+    let mut capture_start = capture_start.into_inner();
+    if line.line.is_empty() {
+        return;
+    }
+
+    if line.line[0] != capture_start.translation.xy() {
+        capture_start.translation = line.line[0].clone().extend(capture_start.translation.z);
+    }
+}
+
+fn destroy_line(line: Single<Entity, With<CaptureLineStart>>, mut commands: Commands) {
+    let e = line.into_inner();
+    commands.entity(e).insert(Despawn);
 }
 
 fn reset_capture_progress(creature_progress: Query<&mut CaptureProgress, Without<Captured>>) {
@@ -403,9 +458,49 @@ fn emit_capture_events(
     }
 }
 
-fn player_start_capture(mut event_writer: EventWriter<CapturePointPressed>) {
+fn player_start_capture(
+    mut commands: Commands,
+    mut event_writer: EventWriter<CapturePointPressed>,
+    window: Single<&Window, With<PrimaryWindow>>,
+    camera: Single<(&Camera, &GlobalTransform), Without<GizmoCamera>>,
+    assets: Res<Assets>,
+) {
     event_writer.write(CapturePointPressed);
+
+    let window = window.into_inner();
+    let (camera, camera_transform) = camera.into_inner();
+    let current_point = camera
+        .viewport_to_world_2d(camera_transform, window.cursor_position().unwrap())
+        .expect("Unable to calculate cursor position!");
+
+    let mut sprite = Sprite::from_image(assets.styler_start.clone_weak());
+    sprite.custom_size = Some(Vec2::new(9., 9.));
+    let parent = commands
+        .spawn((
+            CaptureLineStart,
+            sprite,
+            Transform::from_translation(current_point.extend(0.)),
+        ))
+        .id();
+    
+    commands.spawn((
+        CaptureLine {
+            line: vec![current_point],
+            width: 12.,
+            ..default()
+        },
+        Health(4),
+        DespawnWith(parent),
+    ));
+
+    commands.spawn((
+        CaptureStyler,
+        Sprite::from_image(assets.styler.clone_weak()),
+        Transform::from_translation(current_point.extend(-1.)),
+        DespawnWith(parent),
+    ));
 }
+
 
 fn player_stop_capture(mut event_writer: EventWriter<CapturePointLifted>) {
     event_writer.write(CapturePointLifted);
