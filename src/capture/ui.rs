@@ -1,4 +1,4 @@
-use crate::capture::{CaptureFailed, CaptureLineCollision, CaptureProgressChanged};
+use crate::capture::{CaptureLineCollision, CaptureProgressChanged};
 use crate::creature::{CaptureProgress, CaptureRequirements, Creature};
 use crate::Despawn;
 use bevy::color;
@@ -16,7 +16,6 @@ impl Plugin for CaptureUiPlugin {
 #[derive(Component, Reflect, Debug, Deref, DerefMut)]
 #[reflect(Component)]
 struct TextDisappearTimer(Timer);
-
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
 struct CaptureCountText;

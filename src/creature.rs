@@ -1,3 +1,6 @@
+mod behavior;
+mod types;
+
 use crate::capture::Damage;
 use avian2d::prelude::{Collider, RigidBody};
 use bevy::prelude::*;
