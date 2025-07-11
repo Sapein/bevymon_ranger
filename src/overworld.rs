@@ -1,10 +1,14 @@
+mod player;
+
 use bevy::prelude::*;
 use bevy_ecs_ldtk::{LdtkPlugin, LdtkWorldBundle, LevelSelection};
+use crate::overworld::player::PlayerPlugin;
 
 pub struct OverworldPlugin;
 impl Plugin for OverworldPlugin {
     fn build(&self, app: &mut App) {
        app.add_plugins(LdtkPlugin)
+           .add_plugins(PlayerPlugin)
            .insert_resource(LevelSelection::index(0))
            .add_systems(Startup, ldtk_setup);
         

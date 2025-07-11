@@ -6,12 +6,11 @@ mod creature;
 mod devtools;
 mod ui;
 mod overworld;
+mod movement;
 
 use crate::camera::BevymonCameraPlugin;
-use crate::capture::CapturePlugin;
-use crate::creature::CreaturePlugin;
-use crate::ui::UiPlugin;
 use bevy::prelude::*;
+use crate::movement::MovementPlugin;
 use crate::overworld::OverworldPlugin;
 
 #[derive(Component, Reflect, Debug)]
@@ -24,6 +23,7 @@ impl Plugin for BevymonRangerPlugin {
         app.add_plugins(avian2d::PhysicsPlugins::default())
             .add_plugins(BevymonCameraPlugin)
             .add_plugins(OverworldPlugin)
+            .add_plugins(MovementPlugin)
             .add_systems(Last, despawn_entities);
 
         #[cfg(feature = "devtools")]
