@@ -2,7 +2,7 @@
 name = "bevymon_ranger"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0 OR CC0-1.0"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 # Replace this with `bevy = "0.13"` when compiling a release build.
