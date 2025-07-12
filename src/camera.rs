@@ -15,6 +15,10 @@ impl Plugin for BevymonCameraPlugin {
 #[reflect(Component)]
 pub struct GizmoCamera;
 
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+struct PrimaryCamera;
+
 fn setup(mut commands: Commands) {
     let mut projection = OrthographicProjection::default_2d();
     projection.scaling_mode = ScalingMode::Fixed {
@@ -39,6 +43,7 @@ fn setup(mut commands: Commands) {
             resolution: (640., 360.).into(),
             allow_imperfect_aspect_ratios: false,
         },
+        PrimaryCamera,
     ));
 
     commands.spawn((

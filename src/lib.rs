@@ -4,14 +4,14 @@ mod camera;
 mod capture;
 mod creature;
 mod devtools;
-mod ui;
-mod overworld;
 mod movement;
+mod overworld;
+mod ui;
 
 use crate::camera::BevymonCameraPlugin;
-use bevy::prelude::*;
 use crate::movement::MovementPlugin;
 use crate::overworld::OverworldPlugin;
+use bevy::prelude::*;
 
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]

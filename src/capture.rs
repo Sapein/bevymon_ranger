@@ -1,5 +1,5 @@
-mod ui;
 mod math;
+mod ui;
 
 use crate::camera::GizmoCamera;
 use crate::capture::math::{intersects, length};
